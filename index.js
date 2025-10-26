@@ -4,8 +4,6 @@ const { useMultiFileAuthState } = require("@whiskeysockets/baileys");
 const P = require("pino");
 const express = require("express");
 const QRCode = require("qrcode");
-const fs = require("fs");
-const path = require("path");
 
 const { tratarMensagemEncomendas } = require("./encomendas");
 const { tratarMensagemLavanderia } = require("./lavanderia");
@@ -16,7 +14,20 @@ const PORT = process.env.PORT || 10000;
 let qrAtual = "";
 let sockGlobal = null;
 
-// 🔹 Servidor HTTP para exibir o QR Code
+// 🔹 Rota principal
+app.get("/", (req, res) => {
+  res.send(`
+    <html>
+      <head><title>Bot JK</title></head>
+      <body style="font-family:sans-serif;text-align:center;margin-top:100px;">
+        <h1>🤖 Bot JK ativo!</h1>
+        <p>Use <a href="/qr">/qr</a> para visualizar o QR Code.</p>
+      </body>
+    </html>
+  `);
+});
+
+// 🔹 Rota QR Code
 app.get("/qr", (req, res) => {
   if (qrAtual) {
     QRCode.toDataURL(qrAtual, (err, url) => {
@@ -37,6 +48,7 @@ app.get("/qr", (req, res) => {
   }
 });
 
+// 🔹 Servidor Express
 app.listen(PORT, () => {
   console.log(`🌐 Servidor HTTP rodando na porta ${PORT}`);
   console.log(`📱 Acesse http://localhost:${PORT}/qr para ver o QR Code`);
@@ -61,12 +73,12 @@ async function iniciarBot() {
   const sock = makeWASocket({
     auth: state,
     logger: P({ level: "silent" }),
-    printQRInTerminal: false, // Desativado conforme aviso do Baileys
+    printQRInTerminal: false, // desativado
   });
 
   sockGlobal = sock;
 
-  // Atualiza credenciais sempre que necessário
+  // Atualiza credenciais
   sock.ev.on("creds.update", saveCreds);
 
   // 🔹 Recebimento de mensagens
@@ -79,35 +91,25 @@ async function iniciarBot() {
       msg.message.conversation ||
       msg.message.extendedTextMessage?.text ||
       "";
-
     const textoLimpo = texto.trim().toLowerCase();
 
-    console.log("🔔 Nova mensagem recebida de:", remetente);
-    console.log("💬 Conteúdo:", textoLimpo);
+    console.log("🔔 Nova mensagem de:", remetente, "| Conteúdo:", textoLimpo);
 
     try {
       // 🧺 Lavanderia JK
-      if (grupos.lavanderia.includes(remetente)) {
-        console.log("🧺 Grupo identificado: Lavanderia JK");
-
-        if (textoLimpo.includes("menu")) {
-          console.log("🧺 Ativando módulo Lavanderia (menu detectado)");
-          await tratarMensagemLavanderia(sock, msg);
-        }
+      if (grupos.lavanderia.includes(remetente) && textoLimpo === "menu") {
+        console.log("🧺 Ativando módulo Lavanderia (menu detectado)");
+        await tratarMensagemLavanderia(sock, msg);
       }
 
       // 📦 JK Universitário (Encomendas)
-      else if (grupos.encomendas.includes(remetente)) {
-        console.log("📦 Grupo identificado: JK Universitário");
-
-        if (textoLimpo.includes("menu")) {
-          console.log("📦 Ativando módulo Encomendas (menu detectado)");
-          await tratarMensagemEncomendas(sock, msg);
-        }
+      else if (grupos.encomendas.includes(remetente) && textoLimpo === "menu") {
+        console.log("📦 Ativando módulo Encomendas (menu detectado)");
+        await tratarMensagemEncomendas(sock, msg);
       }
 
       // Grupo não registrado
-      else {
+      else if (!grupos.lavanderia.includes(remetente) && !grupos.encomendas.includes(remetente)) {
         console.log("⚠️ Grupo não registrado:", remetente);
       }
     } catch (erro) {
