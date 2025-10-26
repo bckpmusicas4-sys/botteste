@@ -1,8 +1,8 @@
 const makeWASocket = require("@whiskeysockets/baileys").default;
 const { useMultiFileAuthState } = require("@whiskeysockets/baileys");
 const P = require("pino");
-const { tratarMensagemEncomendas } = require("./tratarMensagemEncomendas");
-const { tratarMensagemLavanderia } = require("./tratarMensagemLavanderia");
+const { tratarMensagemEncomendas } = require("./encomendas");
+const { tratarMensagemLavanderia } = require("./lavanderia");
 
 const grupos = {
   lavanderia: ["120363357349898033@g.us"],
