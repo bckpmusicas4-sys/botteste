@@ -238,12 +238,14 @@ async function tratarMensagemEncomendas(sock, msg) {
         const recebidoPor = textoUsuario;
         const enc = estado.encomendaSelecionada;
 
-        // ✅ Corrigido: trocado de PATCH → POST
+        // ✅ Correção: formato compatível com Apps Script
         await axios.post(URL_SHEETDB_ENCOMENDAS, {
-          acao: "atualizar",
-          id: enc.ID,
-          status: "Recebida",
-          recebido_por: recebidoPor,
+          data: {
+            acao: "atualizar",
+            id: enc.ID,
+            status: "Recebida",
+            recebido_por: recebidoPor,
+          },
         });
 
         const dataFmt = enc.data
