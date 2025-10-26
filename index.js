@@ -1,3 +1,5 @@
+// ========================= IMPORTS E DEPENDÊNCIAS =========================
+// Baileys (cliente WhatsApp), logger, fs, express, axios, qrcode e módulos locais
 const {
   default: makeWASocket,
   useMultiFileAuthState,
@@ -12,14 +14,22 @@ const QRCode = require("qrcode");
 const { tratarMensagemLavanderia } = require("./lavanderia");
 const { tratarMensagemEncomendas } = require("./encomendas");
 
-// 🔧 Variáveis globais
+// ========================= VARIÁVEIS GLOBAIS =========================
+// sock: conexão do baileys
 let sock;
+
+// Estrutura de grupos salva em arquivo (duas categorias)
 let grupos = { lavanderia: [], encomendas: [] };
+
+// Caminho do arquivo JSON onde os grupos são persistidos
 const caminhoGrupos = "grupos.json";
+
+// Flags de controle de conexão / QR
 let reconectando = false;
 let qrCodeAtual = null;
 
-// 🧱 Carrega grupos salvos no arquivo JSON
+// ========================= CARREGA GRUPOS SALVOS =========================
+// Se o arquivo existir, carrega as listas; caso contrário, será criado ao salvar
 if (fs.existsSync(caminhoGrupos)) {
   grupos = JSON.parse(fs.readFileSync(caminhoGrupos, "utf-8"));
   console.log("✅ Grupos carregados do arquivo:");
@@ -29,14 +39,18 @@ if (fs.existsSync(caminhoGrupos)) {
   console.log("⚠️ Arquivo grupos.json não encontrado. Será criado automaticamente.");
 }
 
+// ========================= FUNÇÃO PRINCIPAL: INICIAR BOT =========================
 /**
- * 🚀 Função principal que inicia a conexão com o WhatsApp
- * Esta função conecta o bot ao WhatsApp usando Baileys e configura todos os eventos
+ * Função iniciar()
+ * - Cria/renova a conexão Baileys
+ * - Configura eventos (mensagens, participantes, conexão)
+ * - Mantém o comportamento original do seu código
  */
 async function iniciar() {
   console.log("🔄 Iniciando conexão com WhatsApp...");
 
-  // 🔄 Limpa eventos antigos para evitar duplicação (sem encerrar sessão)
+  // ========================= REMOÇÃO DE LISTENERS ANTIGOS =========================
+  // Evita duplicação de handlers caso iniciar() seja chamado novamente
   if (sock?.ev) {
     try {
       sock.ev.removeAllListeners();
@@ -46,66 +60,294 @@ async function iniciar() {
     }
   }
 
-  // 📁 Carrega estado de autenticação (pasta auth/)
+  // ========================= AUTENTICAÇÃO E VERSÃO DO BAILEYS =========================
+  // useMultiFileAuthState cria/usa a pasta 'auth' para persistir credenciais
   const { state, saveCreds } = await useMultiFileAuthState("auth");
   const { version } = await fetchLatestBaileysVersion();
 
-  // 🤖 Cria conexão com o WhatsApp
+  // ========================= CRIA SOCKET (CONEXÃO) =========================
   sock = makeWASocket({
     version,
     auth: state,
-    printQRInTerminal: true, // Mostra QR Code no console
-    logger: P({ level: "silent" }), // Logger silencioso
-    browser: ["BotJK", "Chrome", "120.0.0.0"], // Identificação do navegador
+    printQRInTerminal: true, // mostra QR no terminal
+    logger: P({ level: "silent" }), // logger silencioso
+    browser: ["BotJK", "Chrome", "120.0.0.0"], // identificação do "navegador"
   });
 
-  // 💾 Salva credenciais quando atualizadas
+  // Salva credenciais quando atualizadas (persistência)
   sock.ev.on("creds.update", saveCreds);
 
-  // 📩 Evento: Recebimento de mensagens
+  // ========================= EVENTO: MENSAGENS RECEBIDAS =========================
+  /**
+   * messages.upsert
+   * - Recebe mensagens novas (grupos e privados)
+   * - Filtra apenas mensagens de grupos (sufixo @g.us)
+   * - Roteia mensagens para módulos ou lida com comandos administrativos
+   */
   sock.ev.on("messages.upsert", async ({ messages }) => {
     const msg = messages[0];
     const remetente = msg.key.remoteJid;
 
-    // Ignora mensagens inválidas
+    // Filtragem inicial: ignora mensagens inválidas, reações, protocol messages, mensagens próprias
     if (
       !msg.message ||
       msg.key.fromMe ||
       msg.message.protocolMessage ||
       msg.message.reactionMessage ||
-      !remetente.endsWith("@g.us") // Apenas grupos
+      !remetente.endsWith("@g.us") // processar apenas grupos
     )
       return;
 
-    // 🏷️ Tenta detectar automaticamente o tipo de grupo
+    // Captura texto da mensagem (cobre conversation e extendedTextMessage)
+    const texto =
+      (msg.message.conversation && msg.message.conversation.trim()) ||
+      (msg.message.extendedTextMessage && msg.message.extendedTextMessage.text && msg.message.extendedTextMessage.text.trim()) ||
+      "";
+
+    // ------------------------- DETECÇÃO AUTOMÁTICA DE GRUPOS -------------------------
+    // Tenta detectar automaticamente se o grupo pertence a 'lavanderia' ou 'encomendas'
+    // Observação: esta detecção é baseada no nome do grupo (metadata.subject)
     try {
       const metadata = await sock.groupMetadata(remetente);
-      const nomeGrupo = metadata.subject.toLowerCase();
+      const nomeGrupo = (metadata.subject || "").toLowerCase();
 
-      // Adiciona grupo automaticamente se contiver palavras-chave
-      if (
-        nomeGrupo.includes("lavanderia") &&
-        !grupos.lavanderia.includes(remetente)
-      ) {
+      // Palavras-chave para adicionar automaticamente:
+      // - lavanderia
+      // - jk
+      // - jk universitário (expressão)
+      // - encomenda (para lista de encomendas)
+      // Se encontrar a palavra e o ID ainda não estiver registrado, adiciona e salva.
+      if (nomeGrupo.includes("lavanderia") && !grupos.lavanderia.includes(remetente)) {
         grupos.lavanderia.push(remetente);
-        console.log(`✅ Grupo de lavanderia detectado: ${metadata.subject}`);
+        console.log(`✅ Grupo de lavanderia detectado automaticamente: ${metadata.subject}`);
       } else if (
-        (nomeGrupo.includes("jk") || nomeGrupo.includes("encomenda")) &&
+        // Para encomendas aceitamos "jk" (quando for um grupo de encomendas com jk no nome),
+        // "jk universitário" (frase completa) ou "encomenda"
+        (nomeGrupo.includes("jk") || nomeGrupo.includes("jk universitário") || nomeGrupo.includes("encomenda")) &&
         !grupos.encomendas.includes(remetente)
       ) {
         grupos.encomendas.push(remetente);
-        console.log(`✅ Grupo de encomendas detectado: ${metadata.subject}`);
+        console.log(`✅ Grupo de encomendas detectado automaticamente: ${metadata.subject}`);
       }
 
-      // Salva grupos atualizados
+      // Salva qualquer alteração feita pelas detecções automáticas
       fs.writeFileSync(caminhoGrupos, JSON.stringify(grupos, null, 2));
     } catch (e) {
-      console.warn("❌ Erro ao obter metadados do grupo:", e.message);
+      // Em caso de falha ao buscar metadados do grupo, apenas logamos o erro
+      console.warn("❌ Erro ao obter metadados do grupo (detecção automática):", e.message);
     }
 
-    console.log("🔔 Nova mensagem recebida de:", remetente);
+    // Log básico de recebimento
+    console.log("🔔 Nova mensagem recebida de:", remetente, "| texto:", texto);
 
-    // 📨 Roteia mensagem para o módulo correto
+    // ------------------------- TRATAMENTO DE COMANDOS (APENAS ADM) -------------------------
+    // Comandos requeridos:
+    // - !addgrupo <lavanderia|encomendas>  -> adiciona o grupo atual à categoria
+    // - !removegrupo <lavanderia|encomendas> -> remove o grupo atual da categoria
+    // - !listagrupo -> lista todos os grupos registrados (nomes quando acessíveis)
+    //
+    // Regras:
+    // - Apenas administradores do grupo podem executar os comandos
+    // - Comando deve ser digitado no próprio grupo (remetente é o ID do grupo)
+    try {
+      // Normalize o texto para análise de comandos (minúsculas)
+      const textoLower = texto.toLowerCase();
+
+      // Se for comando !addgrupo
+      if (textoLower.startsWith("!addgrupo")) {
+        // Pega argumento (tipo)
+        const parts = textoLower.split(/\s+/); // split por espaço(s)
+        const tipo = parts[1]; // ex: 'lavanderia' ou 'encomendas'
+
+        // Validação básica do argumento
+        if (!tipo || !["lavanderia", "encomendas"].includes(tipo)) {
+          await sock.sendMessage(remetente, {
+            text: "⚠️ Uso: !addgrupo lavanderia  OU  !addgrupo encomendas",
+          });
+          return;
+        }
+
+        // Verifica se quem enviou é admin (apenas admins podem executar)
+        // Para saber se o remetente (o grupo) tem admin? Precisamos saber quem enviou a mensagem:
+        // msg.key.participant contém o ID do usuário que enviou a mensagem (ex: '5511999999999@s.whatsapp.net')
+        const quemEnviou = msg.key.participant; // usuário que digitou o comando
+        let isAdmin = false;
+
+        try {
+          const meta = await sock.groupMetadata(remetente);
+          // metadata.participants é um array com objetos contendo 'id' e flags de admin
+          // Em alguns formatos a propriedade pode ser 'admin' com valor 'admin' ou 'superadmin'
+          // Então buscamos o participante e checamos essas propriedades
+          const participante = meta.participants.find(p => p.id === quemEnviou);
+          if (participante) {
+            // Em diferentes versões da lib, a flag pode ser 'admin' ou 'isAdmin' ou 'isSuperAdmin'.
+            // Vamos checar as opções mais comuns.
+            if (
+              participante.admin === "admin" ||
+              participante.admin === "superadmin" ||
+              participante.isAdmin === true ||
+              participante.isSuperAdmin === true
+            ) {
+              isAdmin = true;
+            }
+          }
+        } catch (err) {
+          console.warn("⚠️ Não foi possível verificar administradores do grupo:", err.message);
+          // Em caso de erro ao buscar metadata, negar a execução do comando por segurança
+          await sock.sendMessage(remetente, {
+            text: "❌ Não foi possível verificar permissões do grupo. Tente novamente mais tarde.",
+          });
+          return;
+        }
+
+        // Se não for admin, responde e retorna
+        if (!isAdmin) {
+          await sock.sendMessage(remetente, {
+            text: "❌ Apenas administradores do grupo podem usar este comando.",
+          });
+          return;
+        }
+
+        // Se já estiver cadastrado, informa
+        if (grupos[tipo].includes(remetente)) {
+          await sock.sendMessage(remetente, {
+            text: `⚠️ Este grupo já está cadastrado como *${tipo}*.`,
+          });
+          return;
+        }
+
+        // Adiciona o grupo à lista correta e salva em disco
+        grupos[tipo].push(remetente);
+        fs.writeFileSync(caminhoGrupos, JSON.stringify(grupos, null, 2));
+
+        // Envia confirmação com o nome do grupo (tenta pegar metadata)
+        try {
+          const meta = await sock.groupMetadata(remetente);
+          await sock.sendMessage(remetente, {
+            text: `✅ Grupo *${meta.subject}* adicionado com sucesso como *${tipo}*!`,
+          });
+        } catch {
+          // Se não conseguir pegar o nome, envia resposta genérica
+          await sock.sendMessage(remetente, {
+            text: `✅ Grupo adicionado com sucesso como *${tipo}*!`,
+          });
+        }
+
+        console.log(`✅ Grupo manualmente adicionado: ${remetente} como ${tipo}`);
+        return; // comando tratado
+      }
+
+      // Se for comando !removegrupo
+      if (textoLower.startsWith("!removegrupo")) {
+        const parts = textoLower.split(/\s+/);
+        const tipo = parts[1];
+
+        if (!tipo || !["lavanderia", "encomendas"].includes(tipo)) {
+          await sock.sendMessage(remetente, {
+            text: "⚠️ Uso: !removegrupo lavanderia  OU  !removegrupo encomendas",
+          });
+          return;
+        }
+
+        // Verifica permissões do usuário que enviou (apenas admin)
+        const quemEnviou = msg.key.participant;
+        let isAdmin = false;
+
+        try {
+          const meta = await sock.groupMetadata(remetente);
+          const participante = meta.participants.find(p => p.id === quemEnviou);
+          if (participante) {
+            if (
+              participante.admin === "admin" ||
+              participante.admin === "superadmin" ||
+              participante.isAdmin === true ||
+              participante.isSuperAdmin === true
+            ) {
+              isAdmin = true;
+            }
+          }
+        } catch (err) {
+          console.warn("⚠️ Não foi possível verificar administradores do grupo:", err.message);
+          await sock.sendMessage(remetente, {
+            text: "❌ Não foi possível verificar permissões do grupo. Tente novamente mais tarde.",
+          });
+          return;
+        }
+
+        if (!isAdmin) {
+          await sock.sendMessage(remetente, {
+            text: "❌ Apenas administradores do grupo podem usar este comando.",
+          });
+          return;
+        }
+
+        // Se não estiver cadastrado, informa
+        if (!grupos[tipo].includes(remetente)) {
+          await sock.sendMessage(remetente, {
+            text: `⚠️ Este grupo não está cadastrado em *${tipo}*.`,
+          });
+          return;
+        }
+
+        // Remove o ID do grupo da lista correspondente
+        grupos[tipo] = grupos[tipo].filter((id) => id !== remetente);
+        fs.writeFileSync(caminhoGrupos, JSON.stringify(grupos, null, 2));
+
+        // Confirma remoção com o nome quando possível
+        try {
+          const meta = await sock.groupMetadata(remetente);
+          await sock.sendMessage(remetente, {
+            text: `🗑️ Grupo *${meta.subject}* removido da categoria *${tipo}*.`,
+          });
+        } catch {
+          await sock.sendMessage(remetente, {
+            text: `🗑️ Grupo removido da categoria *${tipo}*.`,
+          });
+        }
+
+        console.log(`🗑️ Grupo removido manualmente: ${remetente} de ${tipo}`);
+        return; // comando tratado
+      }
+
+      // Se for comando !listagrupo
+      if (textoLower.startsWith("!listagrupo")) {
+        // Monta a resposta com as listas atuais
+        let resposta = "📋 *Grupos registrados:*\n\n";
+
+        // Função auxiliar para listar cada tipo
+        const listar = async (tipo) => {
+          if (!grupos[tipo] || grupos[tipo].length === 0) {
+            resposta += `• Nenhum grupo registrado em *${tipo}*\n\n`;
+            return;
+          }
+
+          resposta += `🧩 *${tipo.toUpperCase()}*\n`;
+          for (const id of grupos[tipo]) {
+            try {
+              const meta = await sock.groupMetadata(id);
+              resposta += ` - ${meta.subject}\n`;
+            } catch {
+              resposta += ` - ${id} (não acessível)\n`;
+            }
+          }
+          resposta += "\n";
+        };
+
+        // Listar ambas categorias
+        await listar("lavanderia");
+        await listar("encomendas");
+
+        // Envia a lista de grupos (texto simples)
+        await sock.sendMessage(remetente, { text: resposta.trim() });
+        return; // comando tratado
+      }
+    } catch (e) {
+      // Erro no bloco de comandos: loga para debug, mas não quebra o fluxo
+      console.error("❗ Erro ao processar comandos administrativos:", e.message);
+    }
+
+    // ------------------------- ROTEAMENTO PARA MÓDULOS EXISTENTES -------------------------
+    // Se o grupo já estiver em uma das listas, encaminha a mensagem para o módulo apropriado
     try {
       if (grupos.lavanderia.includes(remetente)) {
         console.log("🧺 Direcionando para módulo Lavanderia");
@@ -121,7 +363,13 @@ async function iniciar() {
     }
   });
 
-  // 👋 Evento: Entrada e saída de participantes
+  // ========================= EVENTO: PARTICIPANTES (ADD/REMOVE) =========================
+  /**
+   * group-participants.update
+   * - Monitora entradas e saídas do grupo
+   * - Envia boas-vindas quando alguém entra
+   * - Registra no SheetDB quando configurado
+   */
   sock.ev.on("group-participants.update", async (update) => {
     try {
       const metadata = await sock.groupMetadata(update.id);
@@ -133,7 +381,7 @@ async function iniciar() {
           timeZone: "America/Sao_Paulo",
         });
 
-        // Participante entrou no grupo
+        // Quando entra (add)
         if (update.action === "add") {
           console.log(`📱 @${numero} entrou no grupo ${grupoNome}`);
 
@@ -143,7 +391,7 @@ async function iniciar() {
             mentions: [participante],
           });
 
-          // Log no SheetDB (se disponível)
+          // Tenta logar no SheetDB (opcional)
           try {
             await axios.post("https://sheetdb.io/api/v1/7x5ujfu3x3vyb", {
               data: [
@@ -159,7 +407,7 @@ async function iniciar() {
           }
         }
 
-        // Participante saiu do grupo
+        // Quando sai (remove)
         else if (update.action === "remove") {
           console.log(`👋 @${numero} saiu do grupo ${grupoNome}`);
 
@@ -168,7 +416,7 @@ async function iniciar() {
             mentions: [participante],
           });
 
-          // Log no SheetDB (se disponível)
+          // Tenta logar no SheetDB (opcional)
           try {
             await axios.post("https://sheetdb.io/api/v1/7x5ujfu3x3vyb", {
               data: [
@@ -189,11 +437,17 @@ async function iniciar() {
     }
   });
 
-  // 🔄 Evento: Atualização de conexão
+  // ========================= EVENTO: ATUALIZAÇÃO DE CONEXÃO =========================
+  /**
+   * connection.update
+   * - Lida com QR (gera dataURL para exibir na rota /qr)
+   * - Detecta quando a conexão fecha e tenta reconectar (exceto logout)
+   * - Mantém flags de reconexão e QR atual atualizados
+   */
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
 
-    // 📱 QR Code disponível
+    // Quando QR é enviado geramos um dataURL para exibir na rota /qr
     if (qr) {
       try {
         qrCodeAtual = await QRCode.toDataURL(qr);
@@ -203,24 +457,24 @@ async function iniciar() {
       }
     }
 
-    // 🔌 Conexão fechada
+    // Quando a conexão fecha
     if (connection === "close") {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       console.log(`⚠️ Conexão encerrada. Código: ${statusCode}`);
 
-      // Reconecta automaticamente (exceto se foi logout)
+      // Reconecta automaticamente exceto quando foi logout (manter comportamento original)
       if (!reconectando && statusCode !== DisconnectReason.loggedOut) {
         reconectando = true;
         console.log("🔄 Reconectando em 15 segundos...");
         await new Promise((resolve) => setTimeout(resolve, 15000));
-        await iniciar();
+        await iniciar(); // reinicia a conexão
       } else {
         console.log("❌ Sessão encerrada. Escaneie o QR Code novamente em /qr");
         qrCodeAtual = null;
       }
     }
 
-    // ✅ Conexão aberta
+    // Quando a conexão abre com sucesso
     else if (connection === "open") {
       reconectando = false;
       qrCodeAtual = null;
@@ -228,15 +482,18 @@ async function iniciar() {
       console.log("🤖 Bot JK está online e pronto para responder!");
     }
   });
-}
+} // fim da função iniciar()
 
-// ▶️ Inicializa o bot
+// ========================= INICIALIZAÇÃO =========================
+// Chama a função para iniciar a conexão e configurar eventos
 iniciar();
 
-// 🌐 Servidor Express (necessário para manter ativo no Render)
+// ========================= SERVIDOR EXPRESS (UI / QR) =========================
+// Mantive exatamente a UI original para / e /qr, sem alterar aparência ou comportamento
+
 const app = express();
 
-// Rota principal
+// Rota principal - mantém a interface e estilo originais
 app.get("/", (req, res) => {
   res.send(`
     <!DOCTYPE html>
@@ -289,7 +546,7 @@ app.get("/", (req, res) => {
   `);
 });
 
-// Rota para visualizar QR Code
+// Rota para visualizar QR Code — mantém instruções e reload automático (comportamento original)
 app.get("/qr", (req, res) => {
   if (qrCodeAtual) {
     res.send(`
@@ -380,14 +637,15 @@ app.get("/qr", (req, res) => {
   }
 });
 
-// Inicia servidor HTTP
+// ========================= INICIA SERVIDOR HTTP =========================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🌐 Servidor HTTP rodando na porta ${PORT}`);
   console.log(`📱 Acesse http://localhost:${PORT}/qr para ver o QR Code`);
 });
 
-// ♻️ Keep-alive para manter o bot ativo no Render
+// ========================= KEEP-ALIVE (PING) =========================
+// Mantém a instância ativa em plataformas como Render (a cada 5 minutos)
 setInterval(async () => {
   try {
     const url = process.env.RENDER_EXTERNAL_URL
