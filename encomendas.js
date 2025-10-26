@@ -126,7 +126,7 @@ async function tratarMensagemEncomendas(sock, msg) {
           if (!botoesEncomendas.length) return await enviar("📭 Nenhuma encomenda aguardando retirada.");
 
           estadosUsuarios[idSessao] = { etapa: "confirmarRecebedor" };
-          await enviar("📦 Escolha a encomenda que foi retirada clicando no botão:", botoesEncomendas);
+          await enviar("📦 Escolha a encomenda digitando o ID para a baixa", botoesEncomendas);
         } else if (["4", "🕓 Ver Histórico"].includes(textoUsuario)) {
           const { data } = await axios.get(`${URL_API_HISTORICO}?action=historico`);
           if (!data.length) return await enviar("📭 O histórico está vazio.");
