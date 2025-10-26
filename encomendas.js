@@ -1,5 +1,4 @@
 // === MÓDULO ENCOMENDAS - JK UNIVERSITÁRIO ===
-// Autor: Iron Maiden 🤘
 
 const axios = require("axios");
 
@@ -17,6 +16,14 @@ function iniciarTimeout(idSessao) {
     delete estadosUsuarios[idSessao];
     delete timeoutUsuarios[idSessao];
   }, TEMPO_EXPIRACAO_MS);
+}
+
+// 🔹 Função auxiliar para formatar data no padrão brasileiro
+function formatarDataBR(isoDate) {
+  if (!isoDate) return "";
+  const data = new Date(isoDate);
+  if (isNaN(data)) return isoDate;
+  return data.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
 }
 
 async function enviarLog(grupo, usuario, mensagem) {
@@ -88,7 +95,8 @@ async function tratarMensagemEncomendas(sock, msg) {
           if (!data.length) return await enviar("📭 Nenhuma encomenda registrada.");
           let resposta = "📦 *Encomendas Registradas:*\n\n";
           data.forEach(e => {
-            resposta += `🆔 ${e.ID} - ${e.nome}\n📅 ${e.data} | 🛒 ${e.local}\n📍 Status: ${e.status}\n\n`;
+            const dataFormatada = formatarDataBR(e.data);
+            resposta += `🆔 ${e.ID} - ${e.nome}\n📅 ${dataFormatada} | 🛒 ${e.local}\n📍 Status: ${e.status}\n\n`;
           });
           await enviar(resposta.trim());
           delete estadosUsuarios[idSessao];
@@ -110,7 +118,8 @@ async function tratarMensagemEncomendas(sock, msg) {
           if (!data.length) return await enviar("📭 O histórico está vazio.");
           let resposta = "🕓 *Histórico de Encomendas:*\n\n";
           data.forEach(e => {
-            resposta += `🆔 ${e.ID} - ${e.nome}\n📦 ${e.local} | ${e.data}\n📍 ${e.status}\n\n`;
+            const dataFormatada = formatarDataBR(e.data);
+            resposta += `🆔 ${e.ID} - ${e.nome}\n📦 ${e.local} | ${dataFormatada}\n📍 ${e.status}\n\n`;
           });
           await enviar(resposta.trim());
           delete estadosUsuarios[idSessao];
@@ -140,15 +149,15 @@ async function tratarMensagemEncomendas(sock, msg) {
 
         await axios.post(URL_API_ENTREGAS, {
           acao: "adicionar",
-          id: novoId, // ✅ agora envia o ID
+          id: novoId,
           nome: estado.nome,
-          data: estado.data,
+          data: formatarDataBR(estado.data),
           local: estado.local,
           status: "Aguardando Recebimento",
           recebido_por: ""
         });
 
-        await enviar(`✅ Encomenda registrada com sucesso!\n🆔 ${novoId}\n👤 ${estado.nome}\n🗓️ ${estado.data}\n🛒 ${estado.local}\n📍 Status: Aguardando Recebimento`);
+        await enviar(`✅ Encomenda registrada com sucesso!\n🆔 ${novoId}\n👤 ${estado.nome}\n🗓️ ${formatarDataBR(estado.data)}\n🛒 ${estado.local}\n📍 Status: Aguardando Recebimento`);
         delete estadosUsuarios[idSessao];
         break;
 
