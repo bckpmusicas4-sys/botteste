@@ -133,15 +133,22 @@ async function tratarMensagemEncomendas(sock, msg) {
 
       case "obterLocal":
         estado.local = textoUsuario;
+
+        // 🔹 Gera ID automaticamente antes de enviar
+        const { data: lista } = await axios.get(`${URL_API_ENTREGAS}?action=listar`);
+        const novoId = lista.length ? Math.max(...lista.map(e => Number(e.ID) || 0)) + 1 : 1;
+
         await axios.post(URL_API_ENTREGAS, {
           acao: "adicionar",
+          id: novoId, // ✅ agora envia o ID
           nome: estado.nome,
           data: estado.data,
           local: estado.local,
           status: "Aguardando Recebimento",
           recebido_por: ""
         });
-        await enviar(`✅ Encomenda registrada com sucesso!\n👤 ${estado.nome}\n🗓️ ${estado.data}\n🛒 ${estado.local}\n📍 Status: Aguardando Recebimento`);
+
+        await enviar(`✅ Encomenda registrada com sucesso!\n🆔 ${novoId}\n👤 ${estado.nome}\n🗓️ ${estado.data}\n🛒 ${estado.local}\n📍 Status: Aguardando Recebimento`);
         delete estadosUsuarios[idSessao];
         break;
 
