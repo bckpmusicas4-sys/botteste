@@ -1,16 +1,17 @@
+// === MÓDULO ENCOMENDAS - JK UNIVERSITÁRIO ===
+// Autor: Iron Maiden 🤘
+
+// === CONFIGURAÇÕES ===
 const axios = require("axios");
 
-// === URLs do Google Apps Script ===
-const URL_API_ENCOMENDAS =
-  "https://script.google.com/macros/s/AKfycbxd-NvEuxFOaF_u-519ajuPtgzStri31HtC0RZVbzSwNLHEaKkWt8O_i_SZCstw-0ha/exec";
-const URL_API_HISTORICO =
-  "https://script.google.com/macros/s/AKfycbyGlZrTV048EKeqsj290mj1IZitDMcfUGbjgatVjzT_-hxlowoo1l8yj_WZog3pI_Bo/exec";
+const URL_API_ENTREGAS = "https://script.google.com/macros/s/AKfycbxd-NvEuxFOaF_u-519ajuPtgzStri31HtC0RZVbzSwNLHEaKkWt8O_i_SZCstw-0ha/exec";
+const URL_API_HISTORICO = "https://script.google.com/macros/s/AKfycbyGlZrTV048EKeqsj290mj1IZitDMcfUGbjgatVjzT_-hxlowoo1l8yj_WZog3pI_Bo/exec";
 
-// === Estados por usuário ===
 let estadosUsuarios = {};
 let timeoutUsuarios = {};
 const TEMPO_EXPIRACAO_MS = 10 * 60 * 1000; // 10 minutos
 
+// --- Reinicia o timeout da sessão ---
 function iniciarTimeout(idSessao) {
   if (timeoutUsuarios[idSessao]) clearTimeout(timeoutUsuarios[idSessao]);
   timeoutUsuarios[idSessao] = setTimeout(() => {
@@ -20,194 +21,145 @@ function iniciarTimeout(idSessao) {
   }, TEMPO_EXPIRACAO_MS);
 }
 
-// === Função principal ===
+// === FUNÇÃO PRINCIPAL ===
 async function tratarMensagemEncomendas(sock, msg) {
   try {
-    if (!msg.message || msg.messageStubType) return;
+    if (!msg.message || msg.key.fromMe || msg.messageStubType) return;
 
     const remetente = msg.key.remoteJid;
-    const textoUsuario =
-      msg.message.conversation?.trim() ||
-      msg.message.extendedTextMessage?.text?.trim() ||
-      "";
+    const textoUsuario = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").trim();
     const idSessao = remetente;
-    const usuario = msg.pushName || "Desconhecido";
+    const estado = estadosUsuarios[idSessao] || {};
 
-    if (!textoUsuario) return;
-
-    const sessaoAtiva = estadosUsuarios[idSessao];
-
-    // === Enviar mensagem ===
+    // === Função de envio de mensagem ===
     const enviar = async (mensagem, botoes) => {
       if (botoes && botoes.length > 0) {
-        await sock.sendMessage(remetente, {
+        const buttonsMessage = {
           text: mensagem,
           footer: "Pousada JK Universitário",
           buttons: botoes,
-          headerType: 1,
-        });
+          headerType: 4,
+        };
+        await sock.sendMessage(remetente, buttonsMessage);
       } else {
         await sock.sendMessage(remetente, { text: mensagem });
       }
     };
 
-    // ============================================================
-    // 🔹 COMANDOS ESPECIAIS
-    // ============================================================
+    // === MENU PRINCIPAL ===
+    const menuTexto =
+      "📦 *MENU ENCOMENDAS - JK UNIVERSITÁRIO*\n\n" +
+      "Escolha uma das opções abaixo:\n\n" +
+      "1️⃣ Registrar Encomenda 📦\n" +
+      "2️⃣ Ver Encomendas 📋\n" +
+      "3️⃣ Confirmar Retirada ✅\n" +
+      "4️⃣ Ver Histórico 🕓\n\n" +
+      "Digite o número da opção desejada ou use os comandos:\n" +
+      "• *!ping* - Verificar status do bot\n" +
+      "• *!ajuda* ou *menu* - Ver este menu\n" +
+      "• *!info* - Informações do grupo";
 
-    if (
-      ["!menu", "menu", "!ajuda", "ajuda", "0"].includes(
-        textoUsuario.toLowerCase()
-      )
-    ) {
+    const botoesMenu = [
+      { buttonId: "1", buttonText: { displayText: "📦 Registrar" }, type: 1 },
+      { buttonId: "2", buttonText: { displayText: "📋 Ver Encomendas" }, type: 1 },
+      { buttonId: "3", buttonText: { displayText: "✅ Confirmar Retirada" }, type: 1 },
+      { buttonId: "4", buttonText: { displayText: "🕓 Ver Histórico" }, type: 1 },
+    ];
+
+    // === Comando inicial ===
+    if (["!menu", "!ajuda", "menu", "0"].includes(textoUsuario.toLowerCase())) {
       estadosUsuarios[idSessao] = { etapa: "menu" };
       iniciarTimeout(idSessao);
-
-      const botoesMenu = [
-        { buttonId: "1", buttonText: { displayText: "📦 Registrar" }, type: 1 },
-        { buttonId: "2", buttonText: { displayText: "📋 Ver Encomendas" }, type: 1 },
-        { buttonId: "3", buttonText: { displayText: "✅ Confirmar Retirada" }, type: 1 },
-        { buttonId: "4", buttonText: { displayText: "🕓 Ver Histórico" }, type: 1 },
-      ];
-
-      await enviar(
-        "📦 *MENU ENCOMENDAS - JK UNIVERSITÁRIO*\n\nEscolha uma das opções abaixo:",
-        botoesMenu
-      );
-
-      estadosUsuarios[idSessao].etapa = "aguardandoEscolha";
+      await enviar(menuTexto, botoesMenu);
       return;
     }
 
-    if (textoUsuario.toLowerCase() === "!ping") {
-      return await enviar("🏓 Bot ativo e funcionando!");
-    }
-
-    if (textoUsuario.toLowerCase() === "!info") {
-      return await enviar(
-        "ℹ️ *Pousada JK Universitário*\nSistema de controle de encomendas 📦\n\nDesenvolvido por Iron Maiden 🧠"
-      );
-    }
-
-    if (!sessaoAtiva) return;
+    // === Se o usuário não tiver sessão, ignora ===
+    if (!estado.etapa) return;
 
     iniciarTimeout(idSessao);
-    const estado = estadosUsuarios[idSessao];
 
-    // ============================================================
-    // 🔹 ETAPAS DO FLUXO
-    // ============================================================
+    // === Etapas do fluxo ===
     switch (estado.etapa) {
-      case "aguardandoEscolha":
+      case "menu":
         if (["1", "📦 Registrar"].includes(textoUsuario)) {
           estado.etapa = "obterNome";
-          await enviar("👤 Qual o nome do morador?");
-          return;
-        }
-
-        if (["2", "📋 Ver Encomendas"].includes(textoUsuario)) {
-          const { data } = await axios.get(`${URL_API_ENCOMENDAS}?action=listar`);
-          if (!data || !data.length) {
-            await enviar("📭 Nenhuma encomenda registrada ainda.");
-          } else {
-            let resposta = "📋 *Encomendas Atuais:*\n\n";
-            data.forEach((e) => {
-              resposta += `🆔 ${e.ID} | ${e.nome} | ${e.local}\n📦 ${e.status}\n\n`;
-            });
-            await enviar(resposta.trim());
-          }
+          await enviar("👤 Qual o nome do destinatário?");
+        } else if (["2", "📋 Ver Encomendas"].includes(textoUsuario)) {
+          const { data } = await axios.get(`${URL_API_ENTREGAS}?action=listar`);
+          if (!data.length) return await enviar("📭 Nenhuma encomenda registrada.");
+          let resposta = "📦 *Encomendas Registradas:*\n\n";
+          data.forEach(e => {
+            resposta += `🆔 ${e.ID} - ${e.nome}\n📅 ${e.data} | 🛒 ${e.local}\n📍 Status: ${e.status}\n\n`;
+          });
+          await enviar(resposta.trim());
           delete estadosUsuarios[idSessao];
-          return;
-        }
-
-        if (["3", "✅ Confirmar Retirada"].includes(textoUsuario)) {
+        } else if (["3", "✅ Confirmar Retirada"].includes(textoUsuario)) {
           estado.etapa = "confirmarID";
-          await enviar("📦 Informe o *ID* da encomenda retirada:");
-          return;
-        }
-
-        if (["4", "🕓 Ver Histórico"].includes(textoUsuario)) {
+          await enviar("📦 Digite o *ID* da encomenda que foi retirada:");
+        } else if (["4", "🕓 Ver Histórico"].includes(textoUsuario)) {
           const { data } = await axios.get(`${URL_API_HISTORICO}?action=historico`);
-          if (!data || !data.length) {
-            await enviar("📭 O histórico está vazio.");
-          } else {
-            let resposta = "🕓 *Histórico de Encomendas:*\n\n";
-            data.slice(-10).forEach((e) => {
-              resposta += `🆔 ${e.ID} | ${e.nome} | ${e.local}\n📬 ${e.status}\n\n`;
-            });
-            await enviar(resposta.trim());
-          }
+          if (!data.length) return await enviar("📭 O histórico está vazio.");
+          let resposta = "🕓 *Histórico de Encomendas:*\n\n";
+          data.forEach(e => {
+            resposta += `🆔 ${e.ID} - ${e.nome}\n📦 ${e.local} | ${e.data}\n📍 ${e.status}\n\n`;
+          });
+          await enviar(resposta.trim());
           delete estadosUsuarios[idSessao];
-          return;
+        } else {
+          await enviar("⚠️ Opção inválida. Escolha 1️⃣, 2️⃣, 3️⃣ ou 4️⃣.");
         }
-
-        await enviar("⚠️ Escolha uma opção válida do menu.");
         break;
 
-      // === Registrar ===
       case "obterNome":
         estado.nome = textoUsuario;
+        estado.etapa = "obterData";
+        await enviar("📅 Qual a data estimada da entrega? (Ex: 26/10/2025)");
+        break;
+
+      case "obterData":
+        estado.data = textoUsuario;
         estado.etapa = "obterLocal";
-        await enviar("🏬 Onde foi feita a compra?");
+        await enviar("🛒 Onde a compra foi realizada? (Ex: Shopee, Mercado Livre)");
         break;
 
       case "obterLocal":
         estado.local = textoUsuario;
-        estado.etapa = "obterData";
-        await enviar("📅 Qual a data estimada de entrega? (ex: 25/10/2025)");
-        break;
-
-      case "obterData": {
-        const partes = textoUsuario.split(/[./-]/);
-        if (partes.length !== 3)
-          return await enviar("⚠️ Use o formato dia/mês/ano.");
-        const [dia, mes, ano] = partes.map((x) => parseInt(x, 10));
-        const data = `${String(dia).padStart(2, "0")}/${String(mes).padStart(
-          2,
-          "0"
-        )}/${ano}`;
-        estado.data = data;
-
-        await axios.post(URL_API_ENCOMENDAS, {
+        await axios.post(URL_API_ENTREGAS, {
           acao: "adicionar",
           nome: estado.nome,
-          local: estado.local,
           data: estado.data,
+          local: estado.local,
         });
-
         await enviar(
-          `✅ Encomenda registrada!\n👤 ${estado.nome}\n🛒 ${estado.local}\n📅 ${estado.data}`
+          `✅ Encomenda registrada com sucesso!\n👤 ${estado.nome}\n🗓️ ${estado.data}\n🛒 ${estado.local}`
         );
         delete estadosUsuarios[idSessao];
         break;
-      }
 
-      // === Confirmar retirada ===
       case "confirmarID":
         estado.id = textoUsuario;
         estado.etapa = "confirmarRecebedor";
-        await enviar("✋ Quem retirou a encomenda?");
+        await enviar("✋ Quem retirou essa encomenda?");
         break;
 
       case "confirmarRecebedor":
-        await axios.post(URL_API_ENCOMENDAS, {
+        await axios.post(URL_API_ENTREGAS, {
           acao: "atualizar",
           id: estado.id,
           status: "Retirada",
           recebido_por: textoUsuario,
         });
-        await enviar(
-          `✅ Encomenda ${estado.id} marcada como *Retirada* por ${textoUsuario}.`
-        );
+        await enviar(`✅ Encomenda *${estado.id}* marcada como *Retirada* por ${textoUsuario}.`);
         delete estadosUsuarios[idSessao];
         break;
 
       default:
-        await enviar("⚠️ Algo deu errado. Envie *0* para recomeçar.");
+        await enviar("⚠️ Algo deu errado. Digite *!menu* para recomeçar.");
         delete estadosUsuarios[idSessao];
     }
-  } catch (err) {
-    console.error("❌ Erro em encomendas.js:", err.message);
+  } catch (erro) {
+    console.error("❌ Erro no módulo Encomendas:", erro.message);
   }
 }
 
