@@ -76,33 +76,51 @@ async function iniciar() {
 
   // Salva credenciais quando atualizadas (persistência)
   sock.ev.on("creds.update", saveCreds);
+// ========================= EVENTO: MENSAGENS RECEBIDAS =========================
+/**
+ * messages.upsert
+ * - Recebe mensagens novas (grupos e privados)
+ * - Filtra apenas mensagens de grupos (sufixo @g.us)
+ * - Roteia mensagens para módulos ou lida com comandos administrativos
+ */
+sock.ev.on("messages.upsert", async ({ messages }) => {
+  const msg = messages[0];
+  const remetente = msg.key.remoteJid;
 
-  // ========================= EVENTO: MENSAGENS RECEBIDAS =========================
-  /**
-   * messages.upsert
-   * - Recebe mensagens novas (grupos e privados)
-   * - Filtra apenas mensagens de grupos (sufixo @g.us)
-   * - Roteia mensagens para módulos ou lida com comandos administrativos
-   */
-  sock.ev.on("messages.upsert", async ({ messages }) => {
-    const msg = messages[0];
-    const remetente = msg.key.remoteJid;
+  // Filtragem inicial: ignora mensagens inválidas, reações, protocol messages, mensagens próprias
+  if (
+    !msg.message ||
+    msg.key.fromMe ||
+    msg.message.protocolMessage ||
+    msg.message.reactionMessage ||
+    !remetente.endsWith("@g.us") // processar apenas grupos
+  )
+    return;
 
-    // Filtragem inicial: ignora mensagens inválidas, reações, protocol messages, mensagens próprias
-    if (
-      !msg.message ||
-      msg.key.fromMe ||
-      msg.message.protocolMessage ||
-      msg.message.reactionMessage ||
-      !remetente.endsWith("@g.us") // processar apenas grupos
-    )
-      return;
+  // Captura texto da mensagem (cobre conversation e extendedTextMessage)
+  const texto =
+    (msg.message.conversation && msg.message.conversation.trim()) ||
+    (msg.message.extendedTextMessage &&
+      msg.message.extendedTextMessage.text &&
+      msg.message.extendedTextMessage.text.trim()) ||
+    "";
 
-    // Captura texto da mensagem (cobre conversation e extendedTextMessage)
-    const texto =
-      (msg.message.conversation && msg.message.conversation.trim()) ||
-      (msg.message.extendedTextMessage && msg.message.extendedTextMessage.text && msg.message.extendedTextMessage.text.trim()) ||
-      "";
+  // 🆔 Comando para mostrar o ID do grupo
+  if (texto.toLowerCase() === "!idgrupo") {
+    try {
+      const metadata = await sock.groupMetadata(remetente);
+      const nomeGrupo = metadata.subject;
+      await sock.sendMessage(remetente, {
+        text: `🆔 ID do grupo *${nomeGrupo}*:\n\n\`${remetente}\``
+      });
+      console.log(`📡 ID solicitado no grupo: ${nomeGrupo} → ${remetente}`);
+    } catch (e) {
+      console.error("❌ Erro ao obter ID do grupo:", e.message);
+    }
+    return; // impede que o restante do código processe essa mensagem
+  }
+
+  // (segue o restante do código normalmente)
 
     // ------------------------- DETECÇÃO AUTOMÁTICA DE GRUPOS -------------------------
     // Tenta detectar automaticamente se o grupo pertence a 'lavanderia' ou 'encomendas'
