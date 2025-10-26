@@ -48,11 +48,10 @@ async function tratarMensagemEncomendas(sock, msg) {
 
     const textoUsuario =
       (msg.message.conversation ||
-       msg.message?.extendedTextMessage?.text ||
-       msg.message?.buttonsResponseMessage?.selectedButtonId ||
-       msg.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
-       ""
-      ).trim();
+        msg.message?.extendedTextMessage?.text ||
+        msg.message?.buttonsResponseMessage?.selectedButtonId ||
+        msg.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
+        "").trim();
 
     if (!msg.key.fromMe && textoUsuario) await enviarLog(grupo, usuario, textoUsuario);
 
@@ -133,7 +132,6 @@ async function tratarMensagemEncomendas(sock, msg) {
           if (!data.length) return await enviar("📭 O histórico está vazio.");
 
           let resposta = "🕓 *Histórico de Encomendas:*\n\n";
-          // 🔹 Mostra 5 linhas por vez
           for (let i = 0; i < data.length; i += 5) {
             const grupo5 = data.slice(i, i + 5);
             grupo5.forEach(e => {
@@ -141,7 +139,7 @@ async function tratarMensagemEncomendas(sock, msg) {
               resposta += `🆔 ${e.ID} - ${e.nome}\n📦 ${e.local} | ${dataFormatada}\n📍 ${e.status}\n📤 Recebido por: ${e.recebido_por || "-"}\n\n`;
             });
             await enviar(resposta.trim());
-            resposta = ""; // limpa para o próximo grupo
+            resposta = "";
           }
 
           delete estadosUsuarios[idSessao];
@@ -169,23 +167,28 @@ async function tratarMensagemEncomendas(sock, msg) {
         const { data: lista } = await axios.get(`${URL_API_ENTREGAS}?action=listar`);
         const novoId = lista.length ? Math.max(...lista.map(e => Number(e.ID) || 0)) + 1 : 1;
 
+        // ✅ Data enviada correta para Sheets
         await axios.post(URL_API_ENTREGAS, {
           acao: "adicionar",
           id: novoId,
           nome: estado.nome,
-          data: formatarDataBR(estado.data),
+          data: estado.data, // ✅ ISO para sheet reconhecer como DATE
           local: estado.local,
           status: "Aguardando Recebimento",
           recebido_por: ""
         });
 
-        await enviar(`✅ Encomenda registrada com sucesso!\n🆔 ${novoId}\n👤 ${estado.nome}\n🗓️ ${formatarDataBR(estado.data)}\n🛒 ${estado.local}\n📍 Status: Aguardando Recebimento`);
+        await enviar(
+          `✅ Encomenda registrada com sucesso!\n` +
+          `🆔 ${novoId}\n👤 ${estado.nome}\n🗓️ ${formatarDataBR(estado.data)}\n🛒 ${estado.local}\n📍 Status: Aguardando Recebimento`
+        );
+
         delete estadosUsuarios[idSessao];
         break;
 
       // 🔹 Confirmar retirada
       case "confirmarRecebedor":
-        estado.id = textoUsuario; // ID do botão clicado
+        estado.id = textoUsuario;
         estado.etapa = "informarRecebedor";
         await enviar("✋ Quem retirou essa encomenda?");
         break;
