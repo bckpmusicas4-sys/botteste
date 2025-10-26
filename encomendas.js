@@ -6,6 +6,7 @@ const URL_API_ENCOMENDAS =
 const URL_API_HISTORICO =
   "https://script.google.com/macros/s/AKfycbyGlZrTV048EKeqsj290mj1IZitDMcfUGbjgatVjzT_-hxlowoo1l8yj_WZog3pI_Bo/exec";
 
+// === Estados por usuário ===
 let estadosUsuarios = {};
 let timeoutUsuarios = {};
 const TEMPO_EXPIRACAO_MS = 10 * 60 * 1000; // 10 minutos
@@ -36,7 +37,7 @@ async function tratarMensagemEncomendas(sock, msg) {
 
     const sessaoAtiva = estadosUsuarios[idSessao];
 
-    // === Função de envio ===
+    // === Enviar mensagem ===
     const enviar = async (mensagem, botoes) => {
       if (botoes && botoes.length > 0) {
         await sock.sendMessage(remetente, {
@@ -70,8 +71,7 @@ async function tratarMensagemEncomendas(sock, msg) {
       ];
 
       await enviar(
-        "📦 *MENU ENCOMENDAS - JK UNIVERSITÁRIO*\n\n" +
-          "Escolha uma das opções abaixo:",
+        "📦 *MENU ENCOMENDAS - JK UNIVERSITÁRIO*\n\nEscolha uma das opções abaixo:",
         botoesMenu
       );
 
@@ -79,17 +79,16 @@ async function tratarMensagemEncomendas(sock, msg) {
       return;
     }
 
-    // === Comandos rápidos ===
     if (textoUsuario.toLowerCase() === "!ping") {
       return await enviar("🏓 Bot ativo e funcionando!");
     }
+
     if (textoUsuario.toLowerCase() === "!info") {
       return await enviar(
         "ℹ️ *Pousada JK Universitário*\nSistema de controle de encomendas 📦\n\nDesenvolvido por Iron Maiden 🧠"
       );
     }
 
-    // Se não há sessão ativa, ignora
     if (!sessaoAtiva) return;
 
     iniciarTimeout(idSessao);
@@ -100,14 +99,12 @@ async function tratarMensagemEncomendas(sock, msg) {
     // ============================================================
     switch (estado.etapa) {
       case "aguardandoEscolha":
-        // 📦 REGISTRAR
         if (["1", "📦 Registrar"].includes(textoUsuario)) {
           estado.etapa = "obterNome";
           await enviar("👤 Qual o nome do morador?");
           return;
         }
 
-        // 📋 VER ENCOMENDAS
         if (["2", "📋 Ver Encomendas"].includes(textoUsuario)) {
           const { data } = await axios.get(`${URL_API_ENCOMENDAS}?action=listar`);
           if (!data || !data.length) {
@@ -123,14 +120,12 @@ async function tratarMensagemEncomendas(sock, msg) {
           return;
         }
 
-        // ✅ CONFIRMAR RETIRADA
         if (["3", "✅ Confirmar Retirada"].includes(textoUsuario)) {
           estado.etapa = "confirmarID";
           await enviar("📦 Informe o *ID* da encomenda retirada:");
           return;
         }
 
-        // 🕓 VER HISTÓRICO
         if (["4", "🕓 Ver Histórico"].includes(textoUsuario)) {
           const { data } = await axios.get(`${URL_API_HISTORICO}?action=historico`);
           if (!data || !data.length) {
@@ -149,7 +144,7 @@ async function tratarMensagemEncomendas(sock, msg) {
         await enviar("⚠️ Escolha uma opção válida do menu.");
         break;
 
-      // === Registrar encomenda ===
+      // === Registrar ===
       case "obterNome":
         estado.nome = textoUsuario;
         estado.etapa = "obterLocal";
@@ -212,7 +207,7 @@ async function tratarMensagemEncomendas(sock, msg) {
         delete estadosUsuarios[idSessao];
     }
   } catch (err) {
-    console.error("❌ Erro em tratarMensagemEncomendas:", err.message);
+    console.error("❌ Erro em encomendas.js:", err.message);
   }
 }
 
